@@ -192,10 +192,13 @@ void PNGParallel::compress(ofstream &outputFile) {
 
 	//Init vars used for compression
 	int totalDeflateOutputSize = 0;
-	unsigned long adler32Combined = 0L;
+	uint32_t adler32Combined = 0L;
 	z_stream zStreams[NumThreads];
 	size_t deflateOutputSize[NumThreads];
 	char *deflateOutput[NumThreads];
+	size_t startRow[NumThreads];
+	size_t endRow[NumThreads];
+	uint32_t adlerSums[NumThreads];
 
 	#pragma omp parallel for default(shared)
 	for (int threadNum = 0; threadNum < NumThreads; threadNum++) {
@@ -209,6 +212,8 @@ void PNGParallel::compress(ofstream &outputFile) {
 		row = threadNum * static_cast<int>(ceil(static_cast<double>(height) / static_cast<double>(NumThreads)));
 		stopAtRow = static_cast<int>(ceil(static_cast<double>(height) / static_cast<double>(NumThreads))) * (threadNum + 1);
 		stopAtRow = stopAtRow > height ? height : stopAtRow;
+		startRow[threadNum] = row;
+		endRow[threadNum] = stopAtRow;
 
 		//Load all pixel data
 		PixelPacket* pixels = InputFile->getPixels(0, row, width, stopAtRow - row);
@@ -227,11 +232,12 @@ void PNGParallel::compress(ofstream &outputFile) {
 
 		//Let's compress line by line so the input buffer is the number of bytes of one pixel row plus the filter byte
 		zStreams[threadNum].avail_in = (COLOR_FORMAT_BPP * width + 1) * (stopAtRow - row);
-		zStreams[threadNum].avail_in += stopAtRow == height ? 1 : 0;
+		//zStreams[threadNum].avail_in += stopAtRow == height ? 0 : 1;
 
 		//Finish the stream if it's the last pixel row
 		flush = stopAtRow == height ? Z_FINISH : Z_SYNC_FLUSH;
 		zStreams[threadNum].next_in = reinterpret_cast<Bytef*>(filteredRows);
+		zStreams[threadNum].adler = adler32(0L, NULL, 0);
 
 		//Compress the image data with deflate
 		do {
@@ -243,15 +249,21 @@ void PNGParallel::compress(ofstream &outputFile) {
 		} while (zStreams[threadNum].avail_out == 0);
 
 		fclose(deflate_stream);
-		totalDeflateOutputSize += deflateOutputSize[threadNum];
 
-		//Calculate the combined adler32 checksum
-		int input_length = (stopAtRow - (threadNum * (height / NumThreads))) * (COLOR_FORMAT_BPP * width + 1);
-		adler32Combined = adler32_combine(adler32Combined, zStreams[threadNum].adler, input_length);
+		adlerSums[threadNum] = zStreams[threadNum].adler;
 
 		//Finish deflate process
-		(void) deflateEnd(&zStreams[threadNum]);
+                (void) deflateEnd(&zStreams[threadNum]);
+	}
 
+	// These must run in order for safety
+	adler32Combined = adler32(0L, NULL, 0);
+	for (int threadNum = 0; threadNum < NumThreads; threadNum++) {
+               totalDeflateOutputSize += deflateOutputSize[threadNum];
+
+                //Calculate the combined adler32 checksum
+                int input_length = (endRow[threadNum] - startRow[threadNum]) * (COLOR_FORMAT_BPP * width + 1);
+                adler32Combined = adler32_combine(adler32Combined, adlerSums[threadNum], input_length);
 	}
 
 	//Concatenate the zStreams
@@ -269,9 +281,15 @@ void PNGParallel::compress(ofstream &outputFile) {
 	}
 
 	//Add the combined adler32 checksum
-	idatData -= sizeof(adler32Combined);
-	memcpy(idatData, &adler32Combined, sizeof(adler32Combined));
-	idatData -= (totalDeflateOutputSize - sizeof(adler32Combined));
+	//idatData -= sizeof(adler32Combined);
+	//memcpy(idatData, &adler32Combined, sizeof(adler32Combined));
+	//idatData -= (totalDeflateOutputSize - sizeof(adler32Combined));
+	idatData -= 4;
+	*idatData++ = (adler32Combined >> 24) & 0xff;
+	*idatData++ = (adler32Combined >> 16) & 0xff;
+	*idatData++ = (adler32Combined >> 8) & 0xff;
+	*idatData++ = (adler32Combined >> 0) & 0xff;
+	idatData -= (totalDeflateOutputSize);
 
 	//We have to tell libpng that an IDAT was written to the file
 	pngPtr->mode |= PNG_HAVE_IDAT;
