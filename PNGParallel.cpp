@@ -282,7 +282,8 @@ void PNGParallel::compress(ofstream &outputFile) {
 	idatChunks[0].data = idatData;
 	idatChunks[0].size = totalDeflateOutputSize;
 	idatChunks[0].location = PNG_AFTER_IDAT;
-	pngPtr->flags |= 0x10000L; //PNG_FLAG_KEEP_UNSAFE_CHUNKS
+	//pngPtr->flags |= 0x10000L; //PNG_FLAG_KEEP_UNSAFE_CHUNKS
+	png_set_keep_unknown_chunks(pngPtr, 3, idatChunks[0].name, 1); 
 	png_set_unknown_chunks(pngPtr, infoPtr, idatChunks, 1);
 	png_set_unknown_chunk_location(pngPtr, infoPtr, 0, PNG_AFTER_IDAT);
 
