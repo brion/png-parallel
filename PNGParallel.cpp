@@ -199,6 +199,26 @@ void PNGParallel::compress(ofstream &outputFile) {
 	size_t startRow[NumThreads];
 	size_t endRow[NumThreads];
 	uint32_t adlerSums[NumThreads];
+	PixelPacket *filteredData[NumThreads];
+
+        #pragma omp parallel for default(shared)
+        for (int threadNum = 0; threadNum < NumThreads; threadNum++) {
+                int row, stopAtRow;
+
+                //Calculate which lines have to be handled by this thread
+                row = threadNum * static_cast<int>(ceil(static_cast<double>(height) / static_cast<double>(NumThreads)));
+                stopAtRow = static_cast<int>(ceil(static_cast<double>(height) / static_cast<double>(NumThreads))) * (threadNum + 1);
+                stopAtRow = stopAtRow > height ? height : stopAtRow;
+                startRow[threadNum] = row;
+                endRow[threadNum] = stopAtRow;
+
+                //Load all pixel data
+                PixelPacket* pixels = InputFile->getPixels(0, row, width, stopAtRow - row);
+
+                //Add the filter byte and reorder the RGB values
+                PixelPacket *filteredRows = this->filterRows(pixels, stopAtRow - row, width);
+		filteredData[threadNum] = filteredRows;
+	}
 
 	#pragma omp parallel for default(shared)
 	for (int threadNum = 0; threadNum < NumThreads; threadNum++) {
@@ -208,15 +228,9 @@ void PNGParallel::compress(ofstream &outputFile) {
 		const int chunkSize = 16384;
 		unsigned char output_buffer[chunkSize];
 
-		//Calculate which lines have to be handled by this thread
-		row = threadNum * static_cast<int>(ceil(static_cast<double>(height) / static_cast<double>(NumThreads)));
-		stopAtRow = static_cast<int>(ceil(static_cast<double>(height) / static_cast<double>(NumThreads))) * (threadNum + 1);
-		stopAtRow = stopAtRow > height ? height : stopAtRow;
-		startRow[threadNum] = row;
-		endRow[threadNum] = stopAtRow;
+		row = startRow[threadNum];
+		stopAtRow = endRow[threadNum];	
 
-		//Load all pixel data
-		PixelPacket* pixels = InputFile->getPixels(0, row, width, stopAtRow - row);
 		FILE *deflate_stream = open_memstream(&deflateOutput[threadNum], &deflateOutputSize[threadNum]);
 
 		//Allocate deflate state
@@ -227,8 +241,17 @@ void PNGParallel::compress(ofstream &outputFile) {
 			cout << "Not enough memory for compression" << endl;
 		}
 
-		//Add the filter byte and reorder the RGB values
-		PixelPacket *filteredRows = this->filterRows(pixels, stopAtRow - row, width);
+		// Initialize dictionary with the last 32kb of the previous chunk
+		if (threadNum > 0) {
+			int lastThread = threadNum - 1;
+			size_t maxDict = 32768;
+			size_t lastChunkSize = (endRow[lastThread] - startRow[lastThread]) * (COLOR_FORMAT_BPP * width + 1);
+			Bytef* lastData = reinterpret_cast<Bytef*>(filteredData[lastThread]);
+			size_t dictSize = (lastChunkSize > maxDict) ? maxDict : lastChunkSize;
+			deflateSetDictionary(&zStreams[threadNum],
+				lastData + lastChunkSize - dictSize,
+				dictSize);
+		}
 
 		//Let's compress line by line so the input buffer is the number of bytes of one pixel row plus the filter byte
 		zStreams[threadNum].avail_in = (COLOR_FORMAT_BPP * width + 1) * (stopAtRow - row);
@@ -236,7 +259,7 @@ void PNGParallel::compress(ofstream &outputFile) {
 
 		//Finish the stream if it's the last pixel row
 		flush = stopAtRow == height ? Z_FINISH : Z_SYNC_FLUSH;
-		zStreams[threadNum].next_in = reinterpret_cast<Bytef*>(filteredRows);
+		zStreams[threadNum].next_in = reinterpret_cast<Bytef*>(filteredData[threadNum]);
 		zStreams[threadNum].adler = adler32(0L, NULL, 0);
 
 		//Compress the image data with deflate
@@ -274,9 +297,12 @@ void PNGParallel::compress(ofstream &outputFile) {
 			idatData += deflateOutputSize[i];
 		} else {
 			//strip the zlib stream header
-			memcpy(idatData, deflateOutput[i] + 2, deflateOutputSize[i] - 2);
-			idatData += (deflateOutputSize[i] - 2);
-			totalDeflateOutputSize -= 2;
+			// 2 bytes regular
+			// 4 more for the "dictionary"
+			const size_t hdr = 2 + 4;
+			memcpy(idatData, deflateOutput[i] + hdr, deflateOutputSize[i] - hdr);
+			idatData += (deflateOutputSize[i] - hdr);
+			totalDeflateOutputSize -= hdr;
 		}
 	}
 
