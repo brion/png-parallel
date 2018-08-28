@@ -10,13 +10,14 @@
 #ifndef PNGPARALLEL_H_
 #define PNGPARALLEL_H_
 
-
 #include <iostream>
 #include <iterator>
 #include <fstream>
+#include <cstring>
 #include <Magick++/Image.h>
 #include <Magick++/Pixels.h>
 #include <png.h>
+#include "pngpriv.h"
 #include <time.h>
 #include <omp.h>
 #include <zlib.h>
@@ -36,7 +37,7 @@ using namespace Magick;
 
 class PNGParallel {
 public:
-	PNGParallel(Image::Image &inputFile);
+	PNGParallel(Image &inputFile);
 	void setNumThreads(int threads);
 	void setCompressionLevel(int compressionLevel);
 	void compress(ofstream &outputFile);
@@ -47,7 +48,7 @@ private:
 	PixelPacket* filterRows(PixelPacket* pixels, int rows, int rowLength);
 
 	int CompressionLevel;
-	Image::Image *InputFile;
+	Image *InputFile;
 	int NumThreads;
 };
 

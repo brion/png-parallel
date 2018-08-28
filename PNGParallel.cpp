@@ -45,7 +45,7 @@ void pngFlush(png_structp pngPtr) {
  * @param	inputFile
  */
 
-PNGParallel::PNGParallel(Image::Image &inputFile)
+PNGParallel::PNGParallel(Image &inputFile)
 	:InputFile(&inputFile) {
 
 	//default settings
@@ -181,7 +181,7 @@ void PNGParallel::compress(ofstream &outputFile) {
 	png_set_filter(pngPtr, 0, PNG_FILTER_NONE);
 
 	//Write IHDR chunk
-	Geometry::Geometry ig = this->InputFile->size();
+	Geometry ig = this->InputFile->size();
 	int height = ig.height();
 	int width = ig.width();
 	png_set_IHDR(pngPtr, infoPtr, width, height, QuantumDepth, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,

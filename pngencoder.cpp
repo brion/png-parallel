@@ -19,7 +19,7 @@ namespace po = boost::program_options;
 
 int main(int argc, char *argv[]) {
 
-	Image::Image inputFile;
+	Image inputFile;
 	ofstream outputFile;
 	int numThreads = 2;
 

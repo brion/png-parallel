@@ -1,8 +1,8 @@
-CXXFLAGS =	-O3 -g -Wall -fmessage-length=0 -fopenmp -I/usr/include/ImageMagick
+CXXFLAGS =	-O3 -g -Wall -fmessage-length=0 -fopenmp -I/usr/include/ImageMagick-6
 
 OBJS =		pngencoder.o PNGParallel.o
 
-LIBS =	 -lboost_program_options -lMagick++ -lpng
+LIBS =	 -lboost_program_options -lMagick++-6.Q16 -lpng -lz -lgomp
 
 TARGET =	pngencoder
 
